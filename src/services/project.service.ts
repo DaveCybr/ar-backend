@@ -474,24 +474,29 @@ export class ProjectService {
     projectId: string,
     shortCode: string
   ): Promise<string> {
-    // QR contains short URL
     const qrData = `${
       config.app.baseUrl || "https://ar.yourdomain.com"
     }/a/${shortCode}`;
 
     try {
-      // Generate QR as data URL
-      const qrDataUrl = await QRCode.toDataURL(qrData, {
+      // Generate QR as buffer
+      const qrBuffer = await QRCode.toBuffer(qrData, {
         errorCorrectionLevel: "H",
-        type: "image/png",
+        type: "png",
         width: 512,
         margin: 2,
       });
 
-      // TODO: Upload QR image to S3 for permanent storage
-      // For now, return data URL
+      // Save QR to storage
+      const qrKey = `projects/qr/${projectId}.png`;
+      await this.uploadService.saveFile(qrKey, qrBuffer);
 
-      return qrDataUrl;
+      // Return URL to access QR
+      const qrUrl = this.uploadService.getFileUrl(qrKey);
+
+      console.log(`✅ QR code saved: ${qrUrl}`);
+
+      return qrUrl;
     } catch (error) {
       console.error("QR generation error:", error);
       throw new AppError(

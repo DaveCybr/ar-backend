@@ -28,15 +28,21 @@ export const authenticate = async (
 
     const token = authHeader.substring(7);
 
+    // ✅ FIX: Decode dengan struktur yang benar
     const decoded = jwt.verify(token, config.jwt.secret) as {
-      userId: string;
-      email: string;
+      payload: {
+        userId: string;
+        email: string;
+      };
     };
 
+    // ✅ FIX: Ambil dari decoded.payload
     req.user = {
-      id: decoded.userId,
-      email: decoded.email,
+      id: decoded.payload.userId, // ⬅️ Sekarang benar!
+      email: decoded.payload.email,
     };
+
+    console.log("🔐 Authenticated user:", req.user); // ⬅️ Debug log
 
     next();
   } catch (error) {
