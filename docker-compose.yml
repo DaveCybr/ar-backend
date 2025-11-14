@@ -7,12 +7,11 @@ services:
     environment:
       POSTGRES_DB: ar_system
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: admin
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
   redis:
     image: redis:7-alpine
@@ -21,15 +20,6 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-
-  adminer:
-    image: adminer
-    container_name: ar_adminer
-    restart: always
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
 
 volumes:
   postgres_data:

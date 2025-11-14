@@ -1,17 +1,12 @@
 // ============================================
 // FILE: src/services/upload.service.ts
-// File upload & S3 management
+// File upload & Local storage management
 // ============================================
-import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-  HeadObjectCommand,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import sharp from "sharp";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
+import fs from "fs/promises";
+import path from "path";
 import { config } from "../config/config";
 import { AppError } from "../middleware/errorHandler";
 
@@ -22,16 +17,27 @@ export interface PresignedUrlData {
 }
 
 export class UploadService {
-  private s3: S3Client;
+  private uploadDir: string;
 
   constructor() {
-    this.s3 = new S3Client({
-      region: config.aws.region,
-      credentials: {
-        accessKeyId: config.aws.accessKeyId,
-        secretAccessKey: config.aws.secretAccessKey,
-      },
-    });
+    // Base upload directory
+    this.uploadDir = path.join(process.cwd(), "uploads");
+    this.ensureUploadDirExists();
+  }
+
+  // ==========================================
+  // ENSURE UPLOAD DIRECTORY EXISTS
+  // ==========================================
+  private async ensureUploadDirExists(): Promise<void> {
+    try {
+      await fs.mkdir(this.uploadDir, { recursive: true });
+      await fs.mkdir(path.join(this.uploadDir, "projects"), {
+        recursive: true,
+      });
+      console.log(`✅ Upload directory ready: ${this.uploadDir}`);
+    } catch (error) {
+      console.error("Error creating upload directory:", error);
+    }
   }
 
   // ==========================================
@@ -63,27 +69,15 @@ export class UploadService {
     // Generate unique file key
     const fileKey = this.generateFileKey(userId, fileType, mimeType);
 
-    // Create presigned URL
-    const command = new PutObjectCommand({
-      Bucket: config.aws.s3.bucket,
-      Key: fileKey,
-      ContentType: mimeType,
-      ContentLength: fileSize,
-      Metadata: {
-        userId,
-        fileType,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    const uploadUrl = await getSignedUrl(this.s3, command, {
-      expiresIn: config.aws.s3.uploadExpiry,
-    });
+    // For local storage, we return the upload endpoint
+    const uploadUrl = `/api/v1/upload/file?fileKey=${encodeURIComponent(
+      fileKey
+    )}`;
 
     return {
       uploadUrl,
       fileKey,
-      expiresIn: config.aws.s3.uploadExpiry,
+      expiresIn: 3600, // 1 hour
     };
   }
 
@@ -149,22 +143,35 @@ export class UploadService {
   }
 
   // ==========================================
+  // SAVE FILE TO LOCAL STORAGE
+  // ==========================================
+  async saveFile(fileKey: string, buffer: Buffer): Promise<void> {
+    const filePath = path.join(this.uploadDir, fileKey);
+    const directory = path.dirname(filePath);
+
+    try {
+      // Ensure directory exists
+      await fs.mkdir(directory, { recursive: true });
+
+      // Save file
+      await fs.writeFile(filePath, buffer);
+      console.log(`✅ Saved file: ${fileKey}`);
+    } catch (error) {
+      console.error("Error saving file:", error);
+      throw new AppError(500, "SAVE_FAILED", "Failed to save file");
+    }
+  }
+
+  // ==========================================
   // VERIFY FILE EXISTS
   // ==========================================
   async verifyFileExists(fileKey: string): Promise<boolean> {
     try {
-      const command = new HeadObjectCommand({
-        Bucket: config.aws.s3.bucket,
-        Key: fileKey,
-      });
-
-      await this.s3.send(command);
+      const filePath = path.join(this.uploadDir, fileKey);
+      await fs.access(filePath);
       return true;
-    } catch (error: any) {
-      if (error.name === "NotFound") {
-        return false;
-      }
-      throw error;
+    } catch (error) {
+      return false;
     }
   }
 
@@ -172,7 +179,15 @@ export class UploadService {
   // GET FILE URL
   // ==========================================
   getFileUrl(fileKey: string): string {
-    return `https://${config.aws.s3.bucket}.s3.${config.aws.region}.amazonaws.com/${fileKey}`;
+    // Return URL to serve the file
+    return `/uploads/${fileKey}`;
+  }
+
+  // ==========================================
+  // GET FILE PATH
+  // ==========================================
+  getFilePath(fileKey: string): string {
+    return path.join(this.uploadDir, fileKey);
   }
 
   // ==========================================
@@ -180,12 +195,8 @@ export class UploadService {
   // ==========================================
   async deleteFile(fileKey: string): Promise<void> {
     try {
-      const command = new DeleteObjectCommand({
-        Bucket: config.aws.s3.bucket,
-        Key: fileKey,
-      });
-
-      await this.s3.send(command);
+      const filePath = path.join(this.uploadDir, fileKey);
+      await fs.unlink(filePath);
       console.log(`✅ Deleted file: ${fileKey}`);
     } catch (error) {
       console.error("Error deleting file:", error);
@@ -197,12 +208,26 @@ export class UploadService {
   // OPTIMIZE TARGET IMAGE (post-upload)
   // ==========================================
   async optimizeTargetImage(fileKey: string): Promise<void> {
-    // Note: This would require downloading the image from S3,
-    // processing it, and re-uploading. For MVP, we skip this
-    // and do optimization client-side before upload.
+    try {
+      const filePath = this.getFilePath(fileKey);
+      const buffer = await fs.readFile(filePath);
 
-    // TODO: Implement image optimization pipeline
-    console.log(`⚠️ Image optimization not implemented yet for: ${fileKey}`);
+      // Optimize image
+      const optimized = await sharp(buffer)
+        .resize(2048, 2048, {
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+
+      // Save optimized version
+      await fs.writeFile(filePath, optimized);
+      console.log(`✅ Optimized image: ${fileKey}`);
+    } catch (error) {
+      console.error("Error optimizing image:", error);
+      // Don't throw error, just log it
+    }
   }
 
   // ==========================================
@@ -241,6 +266,18 @@ export class UploadService {
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError(400, "INVALID_IMAGE", "Could not process image");
+    }
+  }
+
+  // ==========================================
+  // READ FILE
+  // ==========================================
+  async readFile(fileKey: string): Promise<Buffer> {
+    try {
+      const filePath = this.getFilePath(fileKey);
+      return await fs.readFile(filePath);
+    } catch (error) {
+      throw new AppError(404, "FILE_NOT_FOUND", "File not found");
     }
   }
 }
