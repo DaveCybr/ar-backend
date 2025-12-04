@@ -35,9 +35,6 @@ RUN npm ci --omit=dev
 # Copy hasil build dari stage builder
 COPY --from=builder /app/dist ./dist
 
-# Copy hanya file yang dibutuhkan di production
-COPY --from=builder /app/.env ./.env
-
 # Expose port
 EXPOSE 3000
 
