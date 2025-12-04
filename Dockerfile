@@ -1,20 +1,21 @@
-# Gunakan Node non-Alpine untuk kompatibilitas Sharp
 FROM node:20-bullseye
 
-# Set working directory
 WORKDIR /app
 
-# Copy package.json & package-lock.json
+# Copy deps
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Instal dependensi PRODUCTION
+RUN npm ci --omit=dev
 
-# Copy seluruh project
+# Copy source code
 COPY . .
 
-# Expose port backend
+RUN npm install
+# Jika menggunakan TypeScript → build
+RUN npm run build
+
 EXPOSE 3000
 
-# Jalankan aplikasi
-CMD ["npm", "run", "dev"]
+# Jalankan build (bukan dev)
+CMD ["npm", "run", "start"]
