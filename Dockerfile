@@ -1,22 +1,45 @@
-# Gunakan Node non-Alpine karena Sharp butuh libc
-FROM node:20-bullseye
+# ---------------------------------------
+# 1) BUILDER STAGE
+# ---------------------------------------
+FROM node:20-bullseye AS builder
 
 WORKDIR /app
 
-# Copy hanya file dependency dulu -> cache lebih optimal
+# Copy package.json dan lock file
 COPY package*.json ./
 
-# Install dependensi produksi
-RUN npm ci --omit=dev
+# Install semua deps termasuk devDependencies (TypeScript, nodemon, dll)
+RUN npm ci
 
 # Copy seluruh source code
 COPY . .
 
-# Build TypeScript -> hasilnya masuk folder dist
+# Build TypeScript -> output ke folder dist
 RUN npm run build
 
-# Expose port aplikasi
+
+
+# ---------------------------------------
+# 2) PRODUCTION STAGE
+# ---------------------------------------
+FROM node:20-bullseye AS production
+
+WORKDIR /app
+
+# Copy package.json dan lock file lagi
+COPY package*.json ./
+
+# Install hanya dependency produksi
+RUN npm ci --omit=dev
+
+# Copy hasil build dari stage builder
+COPY --from=builder /app/dist ./dist
+
+# Copy hanya file yang dibutuhkan di production
+COPY --from=builder /app/.env ./.env
+
+# Expose port
 EXPOSE 3000
 
-# Jalankan build (BUKAN npm run dev)
+# Jalankan aplikasi
 CMD ["npm", "run", "start"]
