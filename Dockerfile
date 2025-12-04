@@ -1,21 +1,22 @@
+# Gunakan Node non-Alpine karena Sharp butuh libc
 FROM node:20-bullseye
 
 WORKDIR /app
 
-# Copy deps
+# Copy hanya file dependency dulu -> cache lebih optimal
 COPY package*.json ./
 
-# Instal dependensi PRODUCTION
+# Install dependensi produksi
 RUN npm ci --omit=dev
 
-# Copy source code
+# Copy seluruh source code
 COPY . .
 
-RUN npm install
-# Jika menggunakan TypeScript → build
+# Build TypeScript -> hasilnya masuk folder dist
 RUN npm run build
 
+# Expose port aplikasi
 EXPOSE 3000
 
-# Jalankan build (bukan dev)
+# Jalankan build (BUKAN npm run dev)
 CMD ["npm", "run", "start"]
