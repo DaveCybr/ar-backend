@@ -27,6 +27,7 @@ export const config = {
     host: process.env.REDIS_HOST || "localhost",
     port: parseInt(process.env.REDIS_PORT || "6379"),
     ttl: 3600,
+    url: process.env.REDIS_URL || "",
   },
 
   jwt: {
