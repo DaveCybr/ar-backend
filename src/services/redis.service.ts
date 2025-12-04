@@ -14,14 +14,15 @@ class RedisClient {
   async connect(): Promise<void> {
     try {
       this.client = new Redis({
-        // host: config.redis.host,
-        // port: config.redis.port,
-        url: config.redis.url || undefined,
+        host: config.redis.host,
+        port: config.redis.port,
+        username: config.redis.username,
+        password: config.redis.password,
         retryStrategy: (times) => {
           const delay = Math.min(times * 50, 2000);
           return delay;
         },
-        maxRetriesPerRequest: 2,
+        maxRetriesPerRequest: 3,
       });
 
       this.client.on("error", (error) => {
