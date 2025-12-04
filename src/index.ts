@@ -12,8 +12,10 @@ import { RedisService } from "./services/redis.service";
 import routes from "./routes";
 import { requestLogger } from "./middleware/logger";
 import { Server } from "http";
+
 const app: Application = express();
 let server: Server | null = null;
+app.set('trust proxy', 1);
 
 // ============================================
 // SECURITY MIDDLEWARE
