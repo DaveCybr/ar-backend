@@ -16,11 +16,14 @@ class RedisClient {
       this.client = new Redis({
         host: config.redis.host,
         port: config.redis.port,
+        username: config.redis.user || undefined,
+        password: config.redis.password || undefined,
         retryStrategy: (times) => {
           const delay = Math.min(times * 50, 2000);
           return delay;
         },
         maxRetriesPerRequest: 3,
+        tls: {},
       });
 
       this.client.on("error", (error) => {
