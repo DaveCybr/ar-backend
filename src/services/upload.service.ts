@@ -2,6 +2,7 @@
 // FILE: src/services/upload.service.ts
 // File upload & Local storage management
 // ============================================
+// src/services/upload.service.ts
 import sharp from "sharp";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
@@ -18,10 +19,26 @@ export interface PresignedUrlData {
 
 export class UploadService {
   private uploadDir: string;
+  private baseUrl: string;
 
   constructor() {
-    // Base upload directory
-    this.uploadDir = path.join(process.cwd(), "uploads");
+    // Use UPLOAD_PATH from env if exists, otherwise use default
+    const isProduction = process.env.NODE_ENV === "production";
+
+    this.uploadDir =
+      process.env.UPLOAD_PATH ||
+      (isProduction ? "/app/uploads" : path.join(process.cwd(), "uploads"));
+
+    this.baseUrl =
+      process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+
+    console.log("📁 Upload Service Configuration:", {
+      environment: process.env.NODE_ENV,
+      uploadDir: this.uploadDir,
+      absolutePath: path.resolve(this.uploadDir),
+      baseUrl: this.baseUrl,
+    });
+
     this.ensureUploadDirExists();
   }
 
@@ -30,13 +47,173 @@ export class UploadService {
   // ==========================================
   private async ensureUploadDirExists(): Promise<void> {
     try {
+      // Create base directory
       await fs.mkdir(this.uploadDir, { recursive: true });
-      await fs.mkdir(path.join(this.uploadDir, "projects"), {
-        recursive: true,
-      });
+
+      // Create projects subdirectory
+      const projectsDir = path.join(this.uploadDir, "projects");
+      await fs.mkdir(projectsDir, { recursive: true });
+
+      // Verify directory is writable
+      await fs.access(this.uploadDir, fs.constants.W_OK);
+
       console.log(`✅ Upload directory ready: ${this.uploadDir}`);
+
+      // List existing contents for debugging
+      const contents = await fs.readdir(this.uploadDir);
+      if (contents.length > 0) {
+        console.log(`📂 Existing files/folders: ${contents.length}`);
+      }
     } catch (error) {
-      console.error("Error creating upload directory:", error);
+      console.error("❌ Error creating upload directory:", error);
+      throw new Error(`Failed to initialize upload directory: ${error}`);
+    }
+  }
+
+  // ==========================================
+  // SAVE FILE TO LOCAL STORAGE
+  // ==========================================
+  async saveFile(fileKey: string, buffer: Buffer): Promise<void> {
+    const filePath = path.join(this.uploadDir, fileKey);
+    const directory = path.dirname(filePath);
+
+    try {
+      // Ensure directory exists
+      await fs.mkdir(directory, { recursive: true });
+
+      // Save file
+      await fs.writeFile(filePath, buffer);
+
+      // Verify file was saved correctly
+      const stats = await fs.stat(filePath);
+
+      console.log(`✅ Saved file: ${fileKey}`, {
+        size: stats.size,
+        path: filePath,
+        url: this.getFileUrl(fileKey),
+      });
+
+      // Verify file is readable
+      await fs.access(filePath, fs.constants.R_OK);
+    } catch (error) {
+      console.error("❌ Error saving file:", error);
+      throw new AppError(500, "SAVE_FAILED", `Failed to save file: ${error}`);
+    }
+  }
+
+  // ==========================================
+  // VERIFY FILE EXISTS
+  // ==========================================
+  async verifyFileExists(fileKey: string): Promise<boolean> {
+    try {
+      const filePath = path.join(this.uploadDir, fileKey);
+      await fs.access(filePath, fs.constants.R_OK);
+
+      const stats = await fs.stat(filePath);
+      console.log(`✅ File verified: ${fileKey}`, {
+        size: stats.size,
+        exists: true,
+      });
+
+      return true;
+    } catch (error) {
+      console.log(`❌ File not found: ${fileKey}`);
+      return false;
+    }
+  }
+
+  // ==========================================
+  // GET FILE URL (Public accessible URL)
+  // ==========================================
+  getFileUrl(fileKey: string): string {
+    // Return relative URL that matches static file serving
+    return `/uploads/${fileKey}`;
+  }
+
+  // ==========================================
+  // GET ABSOLUTE FILE URL
+  // ==========================================
+  getAbsoluteFileUrl(fileKey: string): string {
+    return `${this.baseUrl}/uploads/${fileKey}`;
+  }
+
+  // ==========================================
+  // GET FILE PATH (Server file system path)
+  // ==========================================
+  getFilePath(fileKey: string): string {
+    return path.join(this.uploadDir, fileKey);
+  }
+
+  // ==========================================
+  // DELETE FILE
+  // ==========================================
+  async deleteFile(fileKey: string): Promise<void> {
+    try {
+      const filePath = path.join(this.uploadDir, fileKey);
+
+      // Check if file exists first
+      const exists = await this.verifyFileExists(fileKey);
+      if (!exists) {
+        console.log(`⚠️ File already deleted or not found: ${fileKey}`);
+        return;
+      }
+
+      await fs.unlink(filePath);
+      console.log(`✅ Deleted file: ${fileKey}`);
+    } catch (error) {
+      console.error("❌ Error deleting file:", error);
+      throw new AppError(500, "DELETE_FAILED", "Failed to delete file");
+    }
+  }
+
+  // ==========================================
+  // VALIDATE IMAGE DIMENSIONS
+  // ==========================================
+  async validateImageDimensions(
+    buffer: Buffer
+  ): Promise<{ width: number; height: number }> {
+    try {
+      const metadata = await sharp(buffer).metadata();
+
+      if (!metadata.width || !metadata.height) {
+        throw new Error("Could not read image dimensions");
+      }
+
+      console.log(`✅ Image dimensions: ${metadata.width}x${metadata.height}`);
+
+      // Check minimum dimensions for AR tracking
+      if (metadata.width < 200 || metadata.height < 200) {
+        throw new AppError(
+          400,
+          "IMAGE_TOO_SMALL",
+          "Image must be at least 200x200 pixels for AR tracking"
+        );
+      }
+
+      return {
+        width: metadata.width,
+        height: metadata.height,
+      };
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(400, "INVALID_IMAGE", "Could not process image");
+    }
+  }
+
+  // ==========================================
+  // DEBUG: LIST DIRECTORY CONTENTS
+  // ==========================================
+  async debugListDirectory(dirPath: string = ""): Promise<string[]> {
+    try {
+      const fullPath = path.join(this.uploadDir, dirPath);
+      const contents = await fs.readdir(fullPath, { withFileTypes: true });
+
+      return contents.map((item) => {
+        return item.isDirectory() ? `${item.name}/` : item.name;
+      });
+    } catch (error) {
+      console.error("Error listing directory:", error);
+      return [];
     }
   }
 
@@ -143,68 +320,6 @@ export class UploadService {
   }
 
   // ==========================================
-  // SAVE FILE TO LOCAL STORAGE
-  // ==========================================
-  async saveFile(fileKey: string, buffer: Buffer): Promise<void> {
-    const filePath = path.join(this.uploadDir, fileKey);
-    const directory = path.dirname(filePath);
-
-    try {
-      // Ensure directory exists
-      await fs.mkdir(directory, { recursive: true });
-
-      // Save file
-      await fs.writeFile(filePath, buffer);
-      console.log(`✅ Saved file: ${fileKey}`);
-    } catch (error) {
-      console.error("Error saving file:", error);
-      throw new AppError(500, "SAVE_FAILED", "Failed to save file");
-    }
-  }
-
-  // ==========================================
-  // VERIFY FILE EXISTS
-  // ==========================================
-  async verifyFileExists(fileKey: string): Promise<boolean> {
-    try {
-      const filePath = path.join(this.uploadDir, fileKey);
-      await fs.access(filePath);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  // ==========================================
-  // GET FILE URL
-  // ==========================================
-  getFileUrl(fileKey: string): string {
-    // Return URL to serve the file
-    return `/uploads/${fileKey}`;
-  }
-
-  // ==========================================
-  // GET FILE PATH
-  // ==========================================
-  getFilePath(fileKey: string): string {
-    return path.join(this.uploadDir, fileKey);
-  }
-
-  // ==========================================
-  // DELETE FILE
-  // ==========================================
-  async deleteFile(fileKey: string): Promise<void> {
-    try {
-      const filePath = path.join(this.uploadDir, fileKey);
-      await fs.unlink(filePath);
-      console.log(`✅ Deleted file: ${fileKey}`);
-    } catch (error) {
-      console.error("Error deleting file:", error);
-      throw new AppError(500, "DELETE_FAILED", "Failed to delete file");
-    }
-  }
-
-  // ==========================================
   // OPTIMIZE TARGET IMAGE (post-upload)
   // ==========================================
   async optimizeTargetImage(fileKey: string): Promise<void> {
@@ -236,39 +351,6 @@ export class UploadService {
   calculateHash(buffer: Buffer): string {
     return crypto.createHash("sha256").update(buffer).digest("hex");
   }
-
-  // ==========================================
-  // VALIDATE IMAGE DIMENSIONS
-  // ==========================================
-  async validateImageDimensions(
-    buffer: Buffer
-  ): Promise<{ width: number; height: number }> {
-    try {
-      const metadata = await sharp(buffer).metadata();
-
-      if (!metadata.width || !metadata.height) {
-        throw new Error("Could not read image dimensions");
-      }
-
-      // Check minimum dimensions for AR tracking
-      if (metadata.width < 200 || metadata.height < 200) {
-        throw new AppError(
-          400,
-          "IMAGE_TOO_SMALL",
-          "Image must be at least 200x200 pixels for AR tracking"
-        );
-      }
-
-      return {
-        width: metadata.width,
-        height: metadata.height,
-      };
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError(400, "INVALID_IMAGE", "Could not process image");
-    }
-  }
-
   // ==========================================
   // READ FILE
   // ==========================================
