@@ -6,10 +6,10 @@ import { v4 as uuidv4 } from "uuid";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { DatabaseService } from "./database.service";
-import { UploadService } from "./upload.service";
 import { RedisService } from "./redis.service";
 import { AppError } from "../middleware/errorHandler";
 import { config } from "../config/config";
+import uploadService from "./upload.service";
 
 export interface CreateProjectDTO {
   name: string;
@@ -46,12 +46,6 @@ export interface ProjectFilters {
 }
 
 export class ProjectService {
-  private uploadService: UploadService;
-
-  constructor() {
-    this.uploadService = new UploadService();
-  }
-
   // ==========================================
   // CREATE PROJECT
   // ==========================================
@@ -60,20 +54,18 @@ export class ProjectService {
     await this.checkProjectLimit(userId);
 
     // Verify files exist in S3
-    const targetExists = await this.uploadService.verifyFileExists(
+    const targetExists = await uploadService.verifyFileExists(
       data.targetImageKey
     );
-    const contentExists = await this.uploadService.verifyFileExists(
-      data.contentKey
-    );
+    const contentExists = await uploadService.verifyFileExists(data.contentKey);
 
     if (!targetExists || !contentExists) {
       throw new AppError(404, "FILES_NOT_FOUND", "Uploaded files not found");
     }
 
     // Generate URLs
-    const targetImageUrl = this.uploadService.getFileUrl(data.targetImageKey);
-    const contentUrl = this.uploadService.getFileUrl(data.contentKey);
+    const targetImageUrl = uploadService.getFileUrl(data.targetImageKey);
+    const contentUrl = uploadService.getFileUrl(data.contentKey);
 
     // Generate short code for QR
     const shortCode = this.generateShortCode();
@@ -368,8 +360,8 @@ export class ProjectService {
 
     // Delete files from S3
     try {
-      await this.uploadService.deleteFile(project.target_image_key);
-      await this.uploadService.deleteFile(project.content_key);
+      await uploadService.deleteFile(project.target_image_key);
+      await uploadService.deleteFile(project.content_key);
     } catch (error) {
       console.error("Error deleting files from S3:", error);
       // Continue with DB deletion even if S3 deletion fails
@@ -489,10 +481,10 @@ export class ProjectService {
 
       // Save QR to storage
       const qrKey = `projects/qr/${projectId}.png`;
-      await this.uploadService.saveFile(qrKey, qrBuffer);
+      await uploadService.saveFile(qrKey, qrBuffer);
 
       // Return URL to access QR
-      const qrUrl = this.uploadService.getFileUrl(qrKey);
+      const qrUrl = uploadService.getFileUrl(qrKey);
 
       console.log(`✅ QR code saved: ${qrUrl}`);
 
