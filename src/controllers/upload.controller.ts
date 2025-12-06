@@ -3,7 +3,7 @@
 // Upload endpoints for local storage
 // ============================================
 import { Request, Response, NextFunction } from "express";
-import { UploadService } from "../services/upload.service";
+import uploadService from "../services/upload.service"; // Import singleton instance
 import { body, validationResult } from "express-validator";
 import { AuthRequest } from "../middleware/auth";
 import multer from "multer";
@@ -18,11 +18,8 @@ const upload = multer({
 });
 
 export class UploadController {
-  private uploadService: UploadService;
-
-  constructor() {
-    this.uploadService = new UploadService();
-  }
+  // Remove private uploadService property and constructor
+  // Use the singleton instance directly
 
   // ==========================================
   // POST /api/v1/upload/presigned-url
@@ -48,7 +45,8 @@ export class UploadController {
       const { fileType, mimeType, fileSize } = req.body;
       const userId = req.user!.id;
 
-      const presignedData = await this.uploadService.getPresignedUploadUrl(
+      // Use singleton instance
+      const presignedData = await uploadService.getPresignedUploadUrl(
         userId,
         fileType,
         mimeType,
@@ -69,7 +67,7 @@ export class UploadController {
 
   // ==========================================
   // POST /api/v1/upload/file
-  // Upload file directly to local storage
+  // Upload file directly to storage
   // ==========================================
   uploadFile = async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -95,13 +93,13 @@ export class UploadController {
         });
       }
 
-      // Save file
-      await this.uploadService.saveFile(fileKey, req.file.buffer);
+      // Save file (will use cloud or local based on config)
+      await uploadService.saveFile(fileKey, req.file.buffer);
 
       // If it's a target image, validate dimensions
       if (fileKey.includes("/target/")) {
         try {
-          const dimensions = await this.uploadService.validateImageDimensions(
+          const dimensions = await uploadService.validateImageDimensions(
             req.file.buffer
           );
           console.log(
@@ -109,12 +107,12 @@ export class UploadController {
           );
         } catch (error) {
           // Delete the file if validation fails
-          await this.uploadService.deleteFile(fileKey);
+          await uploadService.deleteFile(fileKey);
           throw error;
         }
       }
 
-      const fileUrl = this.uploadService.getFileUrl(fileKey);
+      const fileUrl = uploadService.getFileUrl(fileKey);
 
       res.json({
         success: true,
@@ -153,8 +151,8 @@ export class UploadController {
         });
       }
 
-      // Verify file exists in local storage
-      const exists = await this.uploadService.verifyFileExists(fileKey);
+      // Verify file exists in storage
+      const exists = await uploadService.verifyFileExists(fileKey);
 
       if (!exists) {
         return res.status(404).json({
@@ -166,7 +164,7 @@ export class UploadController {
         });
       }
 
-      const fileUrl = this.uploadService.getFileUrl(fileKey);
+      const fileUrl = uploadService.getFileUrl(fileKey);
 
       res.json({
         success: true,
@@ -186,11 +184,11 @@ export class UploadController {
 
   // ==========================================
   // GET /uploads/:path*
-  // Serve uploaded files
+  // Serve uploaded files (only for local storage)
   // ==========================================
   serveFile = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const fileKey = req.params.path; // Capture the full path
+      const fileKey = req.params.path;
 
       if (!fileKey) {
         return res.status(400).json({
@@ -202,7 +200,7 @@ export class UploadController {
         });
       }
 
-      const exists = await this.uploadService.verifyFileExists(fileKey);
+      const exists = await uploadService.verifyFileExists(fileKey);
 
       if (!exists) {
         return res.status(404).json({
@@ -214,7 +212,14 @@ export class UploadController {
         });
       }
 
-      const filePath = this.uploadService.getFilePath(fileKey);
+      // For cloud storage, redirect to the URL
+      const fileUrl = uploadService.getFileUrl(fileKey);
+      if (fileUrl.startsWith("http")) {
+        return res.redirect(fileUrl);
+      }
+
+      // For local storage, serve the file
+      const filePath = uploadService.getFilePath(fileKey);
 
       // Set appropriate content type
       const ext = path.extname(fileKey).toLowerCase();
@@ -230,6 +235,7 @@ export class UploadController {
 
       const contentType = contentTypes[ext] || "application/octet-stream";
       res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=31536000");
 
       // Send file
       res.sendFile(filePath);
