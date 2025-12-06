@@ -263,6 +263,107 @@ if (!isProduction) {
 }
 
 // ============================================
+// DEBUG ENDPOINT (Temporarily enable in production)
+// ============================================
+app.get("/api/v1/debug/storage", async (req: Request, res: Response) => {
+  try {
+    const listDirectory = (dir: string): any => {
+      if (!fs.existsSync(dir)) {
+        return { exists: false, path: dir };
+      }
+
+      const items = fs.readdirSync(dir, { withFileTypes: true });
+      return {
+        exists: true,
+        path: dir,
+        items: items.slice(0, 20).map((item) => ({
+          name: item.name,
+          type: item.isDirectory() ? "directory" : "file",
+          size: item.isFile()
+            ? fs.statSync(path.join(dir, item.name)).size
+            : null,
+        })),
+        totalItems: items.length,
+      };
+    };
+
+    // Check specific user directory
+    const userId = "ff8cdb53-250e-4294-8796-de90fd21a35d";
+    const userTargetPath = path.join(uploadsPath, "projects", userId, "target");
+
+    res.json({
+      uploadsPath,
+      absolutePath: path.resolve(uploadsPath),
+      exists: fs.existsSync(uploadsPath),
+      writable:
+        fs.existsSync(uploadsPath) &&
+        (() => {
+          try {
+            fs.accessSync(uploadsPath, fs.constants.W_OK);
+            return true;
+          } catch {
+            return false;
+          }
+        })(),
+      directories: {
+        root: listDirectory(uploadsPath),
+        projects: listDirectory(path.join(uploadsPath, "projects")),
+        userDir: listDirectory(path.join(uploadsPath, "projects", userId)),
+        targetDir: listDirectory(userTargetPath),
+      },
+      specificFile: {
+        path: path.join(
+          userTargetPath,
+          "1765010450633_27e46030-3045-468d-af8a-ddf3554ca206.png"
+        ),
+        exists: fs.existsSync(
+          path.join(
+            userTargetPath,
+            "1765010450633_27e46030-3045-468d-af8a-ddf3554ca206.png"
+          )
+        ),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+  }
+});
+
+// Additional debug: list ALL files recursively
+app.get("/api/v1/debug/storage/tree", async (req: Request, res: Response) => {
+  try {
+    const getAllFiles = (dir: string, fileList: string[] = []): string[] => {
+      const files = fs.readdirSync(dir);
+      files.forEach((file) => {
+        const filePath = path.join(dir, file);
+        if (fs.statSync(filePath).isDirectory()) {
+          getAllFiles(filePath, fileList);
+        } else {
+          fileList.push(filePath);
+        }
+      });
+      return fileList;
+    };
+
+    const allFiles = getAllFiles(uploadsPath);
+
+    res.json({
+      totalFiles: allFiles.length,
+      files: allFiles.map((f) => ({
+        path: f,
+        relativePath: f.replace(uploadsPath, ""),
+        size: fs.statSync(f).size,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+});
+
+// ============================================
 // API ROUTES
 // ============================================
 app.use("/api/v1", routes);
