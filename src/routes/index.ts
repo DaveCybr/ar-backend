@@ -22,13 +22,6 @@ router.get("/", (req, res) => {
     name: "AR System API",
     version: "1.0.0",
     status: "operational",
-    endpoints: {
-      auth: "/api/v1/auth",
-      upload: "/api/v1/upload",
-      projects: "/api/v1/projects (coming soon)",
-      ar: "/api/v1/ar (coming soon)",
-    },
-    documentation: "/api/v1/docs (coming soon)",
   });
 });
 

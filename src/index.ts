@@ -6,6 +6,7 @@ import express, { Application, Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import path from "path";
 import { config } from "./config/config";
 import { DatabaseService } from "./services/database.service";
 import { RedisService } from "./services/redis.service";
@@ -15,11 +16,10 @@ import { Server } from "http";
 
 const app: Application = express();
 let server: Server | null = null;
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
 // ============================================
 // SECURITY MIDDLEWARE
-// ============================================
 // ============================================
 app.use(
   helmet({
@@ -64,6 +64,18 @@ app.use("/api/", limiter);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(requestLogger);
+
+// ============================================
+// SERVE UPLOADED FILES (BEFORE API ROUTES!)
+// ============================================
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "../uploads"), {
+    maxAge: "1d", // Cache for 1 day
+    etag: true,
+    lastModified: true,
+  })
+);
 
 // ============================================
 // HEALTH CHECK
@@ -158,6 +170,7 @@ const startServer = async () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${config.app.env}`);
       console.log(`📍 Health check: http://localhost:${PORT}/health`);
+      console.log(`📁 Static files: http://localhost:${PORT}/uploads`);
     });
   } catch (error) {
     console.error("❌ Failed to start server:", error);
